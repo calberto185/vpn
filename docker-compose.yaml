@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  ubuntu-vpn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ubuntu-openvpn
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    privileged: true  # Descomenta si sigue sin funcionar
+    ports:
+      - "2222:22"            # SSH para administración
+      - "1194:1194/udp"      # OpenVPN UDP
+      - "514:514/udp"        # Syslog (opcional)
+      - "7505:7505"          # OpenVPN Management Interface
+    volumes:
+      - ./data:/data
+      - ./etc-openvpn:/etc/openvpn
+      - ./logs/openvpn:/var/log/openvpn
+      - ./scripts:/scripts
+    env_file:
+      - ./.env
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - OVPN_OUT_IFACE=${OVPN_OUT_IFACE:-eth0}
+      - AUTH_TOKEN=${AUTH_TOKEN}
+      - IPINFO_TOKEN=${IPINFO_TOKEN}
+      - API_URL=${API_URL}
+      - STATUS_FILE=${STATUS_FILE}
+    command: /usr/local/bin/entrypoint.sh
+    networks:
+      - openvpn-net
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv6.conf.all.forwarding: 1
+networks:
+  openvpn-net:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: "fd00::/64"
