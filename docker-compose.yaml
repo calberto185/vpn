@@ -24,6 +24,7 @@ services:
       - ./etc-openvpn:/etc/openvpn
       - ./logs/openvpn:/var/log/openvpn
       - ./scripts:/scripts
+      - /lib/modules:/lib/modules:ro
     env_file:
       - ./.env
     environment:
