@@ -42,10 +42,11 @@ COPY scripts/ /scripts/
 RUN chmod +x /scripts/*.sh && dos2unix /scripts/*.sh && ln -s /scripts/ovpn_* /usr/local/bin/
 
 # Copiar scripts base del sistema
+COPY init-config.sh /usr/local/bin/init-config.sh
 COPY init-openvpn.sh /usr/local/bin/init-openvpn.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY tls-verify.sh /usr/local/bin/tls-verify.sh
-RUN chmod +x /usr/local/bin/init-openvpn.sh /usr/local/bin/entrypoint.sh /usr/local/bin/tls-verify.sh
+RUN chmod +x /usr/local/bin/init-config.sh /usr/local/bin/init-openvpn.sh /usr/local/bin/entrypoint.sh /usr/local/bin/tls-verify.sh
 
 EXPOSE 22 1194/udp 514/udp 1195/udp 7505
 

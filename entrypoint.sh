@@ -6,7 +6,7 @@ echo "🔧 Habilitando reenvío IP..."
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null || true
 
-# -------- Env / Defaults --------
+# -------- Variables --------
 OPENVPN_DIR="/etc/openvpn"
 EASYRSA_DIR="${EASYRSA_DIR:-/data/easy-rsa}"
 OVPN_OUTPUT_DIR="${OVPN_OUTPUT_DIR:-/data/ovpn}"
@@ -20,7 +20,7 @@ OVPN_NET6="${OVPN_NET6:-fd00::/64}"
 echo "🌐 Interfaz de salida para NAT: ${OUT_IF}"
 echo "🧭 Redes tun: ${OVPN_NET} / ${OVPN_NET6}"
 
-# -------- Asegurar herramientas (best-effort; idealmente ya en la imagen) --------
+# -------- Asegurar herramientas --------
 if ! command -v iptables >/dev/null; then apt-get update && apt-get install -y iptables || true; fi
 command -v ip6tables >/dev/null || true
 command -v nft >/dev/null || true
@@ -29,7 +29,6 @@ command -v nft >/dev/null || true
 if ! iptables -t nat -C POSTROUTING -s "${OVPN_NET}" -o "${OUT_IF}" -j MASQUERADE 2>/dev/null; then
   iptables -t nat -A POSTROUTING -s "${OVPN_NET}" -o "${OUT_IF}" -j MASQUERADE || true
 fi
-# Permitir forward desde/ hacia tun0 (idempotente)
 if ! iptables -C FORWARD -i tun0 -j ACCEPT 2>/dev/null; then
   iptables -A FORWARD -i tun0 -j ACCEPT || true
 fi
@@ -37,14 +36,13 @@ if ! iptables -C FORWARD -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT 
   iptables -A FORWARD -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT || true
 fi
 
-# -------- NAT IPv6 (best-effort) --------
+# -------- NAT IPv6 --------
 if command -v ip6tables >/dev/null; then
   modprobe ip6table_nat || true
   if ! ip6tables -t nat -C POSTROUTING -s "${OVPN_NET6}" -o "${OUT_IF}" -j MASQUERADE 2>/dev/null; then
     ip6tables -t nat -A POSTROUTING -s "${OVPN_NET6}" -o "${OUT_IF}" -j MASQUERADE || echo "⚠️ NAT IPv6 no soportado. Continuando."
   fi
 fi
-# nftables IPv6 (opcional, sin duplicar)
 if command -v nft >/dev/null; then
   nft list ruleset >/dev/null 2>&1 || true
   nft list table ip6 nat >/dev/null 2>&1 || nft add table ip6 nat
@@ -56,14 +54,15 @@ fi
 
 # -------- Autocuración Easy-RSA / PKI / server.conf --------
 mkdir -p "$OVPN_OUTPUT_DIR" /var/log/openvpn
-if [ ! -d "$EASYRSA_DIR" ] || [ ! -f "$OPENVPN_DIR/server.conf" ]; then
+
+if [ ! -d "$EASYRSA_DIR/pki" ] || [ ! -f "$OPENVPN_DIR/server.conf" ]; then
   echo "🔧 Inicializando OpenVPN/Easy-RSA (faltan assets)"
   /usr/local/bin/init-openvpn.sh
 else
   echo "🟢 OpenVPN y Easy-RSA ya están listos."
 fi
 
-# Asegurar clave simétrica para tls-* (misma ruta para ambos modos)
+# -------- Asegurar clave simétrica TLS --------
 if [ ! -f "$TLS_KEY_PATH" ]; then
   echo "⚠️ $TLS_KEY_PATH no existe; generando..."
   openvpn --genkey --secret "$TLS_KEY_PATH"
@@ -72,13 +71,11 @@ fi
 
 # -------- Alinear server.conf con TLS_MODE --------
 if [ -f "$OPENVPN_DIR/server.conf" ]; then
-  # management 0.0.0.0 7505 (si no existe, añadir)
   if ! grep -qE '^[[:space:]]*management[[:space:]]+0\.0\.0\.0[[:space:]]+7505' "$OPENVPN_DIR/server.conf"; then
     echo "management 0.0.0.0 7505" >> "$OPENVPN_DIR/server.conf"
   fi
 
   if [ "${TLS_MODE}" = "tls-auth" ]; then
-    # Quitar tls-crypt y asegurar tls-auth ta.key 0
     sed -i '/^[[:space:]]*tls-crypt[[:space:]]\+/d' "$OPENVPN_DIR/server.conf"
     if grep -q 'tls-auth' "$OPENVPN_DIR/server.conf"; then
       sed -i 's|^[[:space:]]*tls-auth .*|tls-auth ta.key 0|' "$OPENVPN_DIR/server.conf"
@@ -86,7 +83,6 @@ if [ -f "$OPENVPN_DIR/server.conf" ]; then
       echo "tls-auth ta.key 0" >> "$OPENVPN_DIR/server.conf"
     fi
   else
-    # tls-crypt (recomendado): quitar tls-auth y asegurar tls-crypt ta.key
     sed -i '/^[[:space:]]*tls-auth[[:space:]]\+/d' "$OPENVPN_DIR/server.conf"
     if grep -q 'tls-crypt' "$OPENVPN_DIR/server.conf"; then
       sed -i 's|^[[:space:]]*tls-crypt .*|tls-crypt ta.key|' "$OPENVPN_DIR/server.conf"
@@ -102,9 +98,13 @@ if [ -x /scripts/log-conexiones.sh ]; then
   /scripts/log-conexiones.sh &
 fi
 
-# -------- Endpoint (solo informativo) --------
+# Asegurar permisos de ejecución en scripts
+if [ -f /scripts/notificar_estado.sh ]; then
+  chmod +x /scripts/notificar_estado.sh
+fi
+# -------- Endpoint --------
 IP_PUBLICA="${OVPN_ENDPOINT:-$(curl -s ifconfig.me || echo "YOUR_SERVER_IP")}"
 echo "🚀 Iniciando OpenVPN en primer plano..."
 echo "✅ Public endpoint: $IP_PUBLICA   (TLS_MODE=${TLS_MODE})"
 
-exec openvpn --config "$OPENVPN_DIR/server.conf" --cd "$OPENVPN_DIR" --log /var/log/openvpn/openvpn.log --foreground
+exec openvpn --config "$OPENVPN_DIR/server.conf" --cd "$OPENVPN_DIR" --log /var/log/openvpn/openvpn.log
