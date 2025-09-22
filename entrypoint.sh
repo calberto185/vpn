@@ -62,6 +62,13 @@ else
   echo "🟢 OpenVPN y Easy-RSA ya están listos."
 fi
 
+# === AUTOCONFIG dinámico ===
+if [ ! -f /etc/openvpn/server.conf ]; then
+  echo "⚙️ Generando configuración inicial de OpenVPN..."
+  /usr/local/bin/init-config.sh
+  /usr/local/bin/init-openvpn.sh
+fi
+
 # -------- Asegurar clave simétrica TLS --------
 if [ ! -f "$TLS_KEY_PATH" ]; then
   echo "⚠️ $TLS_KEY_PATH no existe; generando..."
@@ -108,3 +115,6 @@ echo "🚀 Iniciando OpenVPN en primer plano..."
 echo "✅ Public endpoint: $IP_PUBLICA   (TLS_MODE=${TLS_MODE})"
 
 exec openvpn --config "$OPENVPN_DIR/server.conf" --cd "$OPENVPN_DIR" --log /var/log/openvpn/openvpn.log
+
+# Mantener el contenedor vivo mostrando logs
+tail -F /var/log/openvpn/openvpn.log
